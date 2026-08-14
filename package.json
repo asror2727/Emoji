@@ -1,6 +1,7 @@
 {
-  "name": "emoji-bot",
+  "name": "emoji-maker-bot",
   "version": "1.0.0",
+  "description": "Telegram Premium Emoji Maker Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
