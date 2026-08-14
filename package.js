@@ -1,5 +1,5 @@
 {
-  "name": "telegram-emoji-bot",
+  "name": "emoji-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
