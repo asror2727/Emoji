@@ -14,6 +14,26 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { spawn } = require("child_process");
+const opentype = require("opentype.js");
+
+// =====================================================
+// SHRIFT (bundled, __dirname'da index.js bilan bir joyda)
+// Server'da qanday shrift o'rnatilgan bo'lishidan qat'i nazar
+// matn har doim to'g'ri chiziladi — chunki tizim shriftlariga
+// (fontconfig) umuman bog'liq emas, harflar vektor path
+// sifatida to'g'ridan-to'g'ri chiziladi.
+// =====================================================
+
+const FONT_PATH = path.join(__dirname, "DejaVuSans-Bold.ttf");
+let FONT = null;
+
+try {
+    FONT = opentype.loadSync(FONT_PATH);
+    console.log("✅ Shrift yuklandi:", FONT_PATH);
+} catch (error) {
+    console.error("❌ SHRIFT YUKLANMADI:", error.message,
+        "\n   DejaVuSans-Bold.ttf fayli index.js bilan bir papkada bo'lishi shart!");
+}
 
 // =====================================================
 // ENV
@@ -255,6 +275,44 @@ function computeFontSize(text, canvasSize) {
     return Math.round(canvasSize * 0.2);
 }
 
+// =====================================================
+// MATNNI VEKTOR PATH SIFATIDA SVG'GA CHIZISH
+// (tizim shriftiga bog'liq emas — FONT bundled TTF'dan olinadi)
+// =====================================================
+
+function buildTextSvg(text, width, height, fillColor, strokeColor) {
+    const upperText = text.toUpperCase();
+    const fontSize = computeFontSize(upperText, Math.min(width, height));
+    const strokeWidth = Math.max(2, Math.round(fontSize * 0.09));
+
+    if (FONT) {
+        const scale = fontSize / FONT.unitsPerEm;
+        const advanceWidth = FONT.getAdvanceWidth(upperText, fontSize);
+        const ascender = FONT.ascender * scale;
+        const descender = FONT.descender * scale; // manfiy son
+        const totalHeight = ascender - descender;
+
+        const x = (width - advanceWidth) / 2;
+        const y = (height - totalHeight) / 2 + ascender;
+
+        const glyphPath = FONT.getPath(upperText, x, y, fontSize);
+        const pathData = glyphPath.toPathData(2);
+
+        return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+            <path d="${pathData}" fill="${fillColor}" stroke="${strokeColor}"
+                stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke"/>
+        </svg>`;
+    }
+
+    // FONT yuklanmagan holat uchun zaxira variant (bo'lmasligi kerak)
+    const safeText = escapeXml(upperText);
+    return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+        <style>.t{font-family:sans-serif;font-weight:900;font-size:${fontSize}px;}</style>
+        <text x="50%" y="50%" class="t" text-anchor="middle" dominant-baseline="central"
+            fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}"
+            paint-order="stroke">${safeText}</text></svg>`;
+}
+
 async function generateStaticEmoji(originalBuffer, text) {
     const base = sharp(originalBuffer).ensureAlpha();
     const metadata = await base.metadata();
@@ -265,14 +323,8 @@ async function generateStaticEmoji(originalBuffer, text) {
     const useWhiteText = brightness < 140;
     const fillColor = useWhiteText ? "#FFFFFF" : "#111111";
     const strokeColor = useWhiteText ? "#000000" : "#FFFFFF";
-    const fontSize = computeFontSize(text, Math.min(width, height));
-    const safeText = escapeXml(text.toUpperCase());
 
-    const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-        <style>.t{font-family:'DejaVu Sans',Arial,sans-serif;font-weight:900;font-size:${fontSize}px;}</style>
-        <text x="50%" y="50%" class="t" text-anchor="middle" dominant-baseline="central"
-            fill="${fillColor}" stroke="${strokeColor}" stroke-width="${Math.max(2, Math.round(fontSize * 0.08))}"
-            paint-order="stroke">${safeText}</text></svg>`;
+    const svg = buildTextSvg(text, width, height, fillColor, strokeColor);
 
     return base.composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
         .resize(100, 100, { fit: "contain" })
@@ -285,13 +337,7 @@ async function generateStaticEmoji(originalBuffer, text) {
 // =====================================================
 
 async function renderTextPng(text, width, height) {
-    const fontSize = computeFontSize(text, Math.min(width, height));
-    const safeText = escapeXml(text.toUpperCase());
-    const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-        <style>.t{font-family:'DejaVu Sans',Arial,sans-serif;font-weight:900;font-size:${fontSize}px;}</style>
-        <text x="50%" y="50%" class="t" text-anchor="middle" dominant-baseline="central"
-            fill="#FFFFFF" stroke="#000000" stroke-width="${Math.max(2, Math.round(fontSize * 0.09))}"
-            paint-order="stroke">${safeText}</text></svg>`;
+    const svg = buildTextSvg(text, width, height, "#FFFFFF", "#000000");
     return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
@@ -339,6 +385,7 @@ async function generateTgsEmoji(originalBuffer, text) {
 // =====================================================
 
 const FONT_CANDIDATES = [
+    FONT_PATH, // bundled font (index.js bilan bir joyda) — birinchi ustuvorlik
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 ];
